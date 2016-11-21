@@ -75,9 +75,12 @@ function Jasmine2ScreenShotReporter(opts) {
       '<style>' +
       'body { font-family: Arial; }' +
       'ul { list-style-position: inside; }' +
+      'h4 { padding: 0 2em 0 0; display: inline; }' +
       'span.passed { padding: 0 1em; color: green; }' +
       'span.failed { padding: 0 1em; color: red; }' +
       'span.pending { padding: 0 1em; color: orange; }' +
+      '.passed-suite { padding: 0 1em; color: green; }' +
+      '.failed-suite { padding: 0 1em; color: red; }' +
       'span.stacktrace { white-space: pre; border: 1px solid rgb(0, 0, 0); font-size: 9pt; padding: 4px; background-color: rgb(204, 204, 204); }' +
       '</style>' +
       '<%= userCss %>' +
@@ -117,6 +120,22 @@ function Jasmine2ScreenShotReporter(opts) {
       'buildQuickLinks();' +
       '}' +
       'window.onload = start;' +
+      '</script>' +
+      '<script src="http://cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>' +
+      '<script>' + 
+      '    jQuery(document).ready(function () {' +
+      '        jQuery("h4").click(function () {' +
+      '            $(this).siblings().each(function () {' +
+      '                $(this).toggle();' +                
+      '            });' +
+      '        });' +
+      '        jQuery("h4").each(function () {' +
+      '            $(this).next().toggle();' +
+      '            $(this).siblings().each(function () {' +
+      '                $(this).toggle();' +                
+      '            });' +
+      '        });' +
+      '    });' +
       '</script>' +
       '</head>' +
       '<body>'
@@ -359,6 +378,22 @@ function Jasmine2ScreenShotReporter(opts) {
       specId:   spec.id
     });
   }
+  
+  function suitePassed (suite) {
+    for(var i=0; i<suite._specs.length; i++) {
+        if(suite._specs[i].status === 'failed') {
+            return false;        
+        }
+    }
+    
+    for(var i=0; i<suite._suites.length; i++) {
+        if(!suitePassed(suite._suites[i])) {
+            return false;  
+        }
+    }
+    
+    return true;
+  }
 
   function printResults(suite) {
     var output = '';
@@ -368,9 +403,12 @@ function Jasmine2ScreenShotReporter(opts) {
     }
 
     suite.isPrinted = true;
+        
+    var markerHtml = suitePassed(suite) ? '<span class="passed-suite">&#10003;</span>' : '<span class="failed-suite">&#10007;</span>';
+    var expanderHtml
 
-    output += '<ul style="list-style-type:none">';
-    output += '<h4>' + suite.description + ' (' + getDuration(suite) + ' s)</h4>';
+    output += '<ul style="list-style-type:none;-webkit-padding-start: 15px;">';
+    output += '<h4>' + markerHtml + ' ' + suite.description + ' (' + getDuration(suite) + ' s)</h4><span>&#10133;</span><span>&#10134;</span>';
 
     _.each(suite._specs, function(spec) {
       spec = specs[spec.id];
