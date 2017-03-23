@@ -1,12 +1,12 @@
 var DEFAULT_DESTINATION = 'target/screenshots';
 
-var fs     = require('fs'),
-    mkdirp = require('mkdirp'),
-    rimraf = require('rimraf'),
-    _      = require('lodash'),
-    path   = require('path'),
-    uuid   = require('uuid'),
-    hat    = require('hat');
+var fs = require('fs'),
+  mkdirp = require('mkdirp'),
+  rimraf = require('rimraf'),
+  _ = require('lodash'),
+  path = require('path'),
+  uuid = require('uuid'),
+  hat = require('hat');
 
 require('string.prototype.startswith');
 
@@ -14,184 +14,189 @@ function Jasmine2ScreenShotReporter(opts) {
   'use strict';
 
   var self = this,
-      suites       = {},   // suite clones
-      specs        = {},   // tes spec clones
-      runningSuite = null, // currently running suite
+    suites = {},   // suite clones
+    specs = {},   // tes spec clones
+    runningSuite = null, // currently running suite
 
-  // report marks
-      marks = {
-        pending:'<span class="pending">~</span>',
-        failed: '<span class="failed">&#10007;</span>',
-        passed: '<span class="passed">&#10003;</span>'
-      },
+    // report marks
+    marks = {
+      pending: '<span class="pending">~</span>',
+      failed: '<span class="failed">&#10007;</span>',
+      passed: '<span class="passed">&#10003;</span>'
+    },
 
-      statusCssClass = {
-        pending: 'pending',
-        failed:  'failed',
-        passed:  'passed'
-      },
+    statusCssClass = {
+      pending: 'pending',
+      failed: 'failed',
+      passed: 'passed'
+    },
 
-  // when use use fit, jasmine never calls suiteStarted / suiteDone, so make a fake one to use
-      fakeFocusedSuite = {
-        id: 'focused',
-        description: 'focused specs',
-        fullName: 'focused specs'
-      };
+    // when use use fit, jasmine never calls suiteStarted / suiteDone, so make a fake one to use
+    fakeFocusedSuite = {
+      id: 'focused',
+      description: 'focused specs',
+      fullName: 'focused specs'
+    };
 
   var linkTemplate = _.template(
-      '<li id="<%= id %>" ' +
-      'class="<%= cssClass %>" ' +
-      'data-spec="<%= specId %>" ' +
-      'data-name="<%= name %>" ' +
-      'data-browser="<%= browserName %>">' +
-      '<%= mark %>' +
-      '<a href="<%= filename[\'main\'] %>"><%= name %></a>' +
-      '<% _.forEach(filename, function (val, key) { if (key != \'main\') { %>' +
-      ' [<a href="<%= val %>"><%= key %></a>] ' +
-      '<% } }) %>' +
-      '(<%= duration %> s)' +
-      '<%= reason %>' +
-      '</li>'
+    '<li id="<%= id %>" ' +
+    'class="<%= cssClass %>" ' +
+    'data-spec="<%= specId %>" ' +
+    'data-name="<%= name %>" ' +
+    'data-browser="<%= browserName %>">' +
+    '<%= mark %>' +
+    '<a href="<%= filename[\'main\'] %>"><%= name %></a>' +
+    '<% _.forEach(filename, function (val, key) { if (key != \'main\') { %>' +
+    ' [<a href="<%= val %>"><%= key %></a>] ' +
+    '<% } }) %>' +
+    '(<%= duration %> s)' +
+    '<%= reason %>' +
+    '</li>'
   );
 
   var nonLinkTemplate = _.template(
-      '<li title="No screenshot was created for this test case." ' +
-      'id="<%= id %>" ' +
-      'class="<%= cssClass %>" ' +
-      'data-spec="<%= specId %>" ' +
-      'data-name="<%= name %>" ' +
-      'data-browser="<%= browserName %>">' +
-      '<%= mark %>' +
-      '<%= name %> ' +
-      '(<%= duration %> s)' +
-      '<%= reason %>' +
-      '</li>'
+    '<li title="No screenshot was created for this test case." ' +
+    'id="<%= id %>" ' +
+    'class="<%= cssClass %>" ' +
+    'data-spec="<%= specId %>" ' +
+    'data-name="<%= name %>" ' +
+    'data-browser="<%= browserName %>">' +
+    '<%= mark %>' +
+    '<%= name %> ' +
+    '(<%= duration %> s)' +
+    '<%= reason %>' +
+    '</li>'
   );
 
   var openReportTemplate = _.template(
-      '<html>' +
-      '<head>' +
-      '<meta charset="utf-8">' +
-      '<style>' +
-      'body { font-family: Arial; }' +
-      'ul { list-style-position: inside; }' +
-      'h4 { padding: 0 2em 0 0; display: inline; }' +
-      'span.passed { padding: 0 1em; color: green; }' +
-      'span.failed { padding: 0 1em; color: red; }' +
-      'span.pending { padding: 0 1em; color: orange; }' +
-      '.passed-suite { padding: 0 1em; color: green; }' +
-      '.failed-suite { padding: 0 1em; color: red; }' +
-      'span.stacktrace { white-space: pre; border: 1px solid rgb(0, 0, 0); font-size: 9pt; padding: 4px; background-color: rgb(204, 204, 204); }' +
-      '</style>' +
-      '<%= userCss %>' +
-      '<script type="text/javascript">' +
-      'function showhide(id) {' +
-      'var e = document.getElementById(id);' +
-      'e.style.display = (e.style.display == "block") ? "none" : "block";' +
-      '}' +
-      'function buildQuickLinks() {' +
-      'var failedSpecs = document.querySelectorAll("li.failed");' +
-      'var quickLinksContainer = document.getElementById("quickLinks");' +
-      'if (!quickLinksContainer) return;' +
-      'for (var i = 0; i < failedSpecs.length; ++i) {' +
-      'var li = document.createElement("li");' +
-      'var a = document.createElement("a");' +
-      'a.href = "#" + failedSpecs[i].id;' +
-      'a.textContent = failedSpecs[i].dataset.name + "  (" + failedSpecs[i].dataset.browser + ")";' +
-      'li.appendChild(a);' +
-      'quickLinksContainer.appendChild(li);' +
-      '}' +
-      '}' +
-      'function updatePassCount() {' +
-      'var totalPassed = document.querySelectorAll("li.passed").length;' +
-      'var totalFailed = document.querySelectorAll("li.failed").length;' +
-      'var totalSpecs = totalFailed + totalPassed;' +
-      'console.log("passed: %s, failed: %s, total: %s", totalPassed, totalFailed, totalSpecs);' +
-      'document.getElementById("summaryTotalSpecs").textContent = ' +
-      'document.getElementById("summaryTotalSpecs").textContent + totalSpecs;' +
-      'document.getElementById("summaryTotalFailed").textContent = ' +
-      'document.getElementById("summaryTotalFailed").textContent + totalFailed;' +
-      'if (totalFailed) {' +
-      'document.getElementById("summary").className = "failed";' +
-      '}' +
-      '}' +
-      'function start() {' +
-      'updatePassCount();' +
-      'buildQuickLinks();' +
-      '}' +
-      'window.onload = start;' +
-      '</script>' +
-      '<script src="http://cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>' +
-      '<script>' + 
-      '    jQuery(document).ready(function () {' +
-      '        jQuery("h4").click(function () {' +
-      '            $(this).siblings().each(function () {' +
-      '                $(this).toggle();' +                
-      '            });' +
-      '        });' +
-      '        jQuery("h4").each(function () {' +
-      '            $(this).next().toggle();' +
-      '            $(this).siblings().each(function () {' +
-      '                $(this).toggle();' +                
-      '            });' +
-      '        });' +
-      '    });' +
-      '</script>' +
-      '</head>' +
-      '<body>'
+    '<html>' +
+    '<head>' +
+    '<meta charset="utf-8">' +
+    '<style>' +
+    'body { font-family: Arial; }' +
+    'ul { list-style-position: inside; }' +
+    'span.passed { padding: 0 1em; color: green; }' +
+    'span.failed { padding: 0 1em; color: red; }' +
+    '.passed-suite { color: green; }' +
+    '.failed-suite { color: red; }' +
+    'span.pending { padding: 0 1em; color: orange; }' +
+    'span.stacktrace { white-space: pre; border: 1px solid rgb(0, 0, 0); font-size: 9pt; padding: 4px; background-color: rgb(204, 204, 204); }' +
+    '</style>' +
+    '<%= userCss %>' +
+    '<script src="https://code.jquery.com/jquery-2.2.4.min.js" integrity="sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44=" crossorigin="anonymous"></script>' +
+    '<script>' +
+    '    jQuery(document).ready(function () {' +
+    '        jQuery("ul h4").click(function () {' +
+    '            $(this).siblings().each(function () {' +
+    '                $(this).toggle();' +
+    '            });' +
+    '        });' +
+    '        jQuery("ul h4").each(function () {' +
+    // '            $(this).next().toggle();' +
+    '            $(this).siblings().each(function () {' +
+    '                $(this).toggle();' +
+    '            });' +
+    '        });' +
+    '    });' +
+    '</script>' +
+    '<script type="text/javascript">' +
+    'function showhide(id) {' +
+    'var e = document.getElementById(id);' +
+    'e.style.display = (e.style.display == "block") ? "none" : "block";' +
+    '}' +
+    'function buildQuickLinks() {' +
+    'var failedSpecs = document.querySelectorAll("li.failed");' +
+    'var quickLinksContainer = document.getElementById("quickLinks");' +
+    'if (!quickLinksContainer) return;' +
+    'for (var i = 0; i < failedSpecs.length; ++i) {' +
+    'var li = document.createElement("li");' +
+    'var a = document.createElement("a");' +
+    'a.href = "#" + failedSpecs[i].id;' +
+    'a.textContent = failedSpecs[i].dataset.name + "  (" + failedSpecs[i].dataset.browser + ")";' +
+    'li.appendChild(a);' +
+    'quickLinksContainer.appendChild(li);' +
+    '}' +
+    '}' +
+    'function updatePassCount() {' +
+    'var totalPassed = document.querySelectorAll("li.passed").length;' +
+    'var totalFailed = document.querySelectorAll("li.failed").length;' +
+    'var totalSuitesPassed = document.querySelectorAll("body > ul > h4 > span.passed-suite").length;' +
+    'var totalSuitesFailed = document.querySelectorAll("body > ul > h4 > span.failed-suite").length;' +
+    'var totalSpecs = totalFailed + totalPassed;' +
+    'var totalSuites = totalSuitesFailed + totalSuitesPassed;' +
+    'console.log("passed: %s, failed: %s, total: %s", totalPassed, totalFailed, totalSpecs);' +
+    'document.getElementById("summaryTotalSuites").textContent = ' +
+    'document.getElementById("summaryTotalSuites").textContent + totalSuites;' +
+    'document.getElementById("summaryTotalSpecs").textContent = ' +
+    'document.getElementById("summaryTotalSpecs").textContent + totalSpecs;' +
+    'document.getElementById("summaryTotalFailed").textContent = ' +
+    'document.getElementById("summaryTotalFailed").textContent + totalFailed;' +
+    'if (totalFailed) {' +
+    'document.getElementById("summary").className = "failed";' +
+    '}' +
+    '}' +
+    'function start() {' +
+    'updatePassCount();' +
+    'buildQuickLinks();' +
+    '}' +
+    'window.onload = start;' +
+    '</script>' +
+    '</head>' +
+    '<body>'
   );
 
   var addReportTitle = _.template(
-      '<h1><%= title %></h1>'
+    '<h1><%= title %></h1>'
   );
 
   var addReportSummary = _.template(
-      '<div id="summary" class="passed">' +
-      '<h4>Summary</h4>' +
-      '<ul>' +
-      '<li id="summaryTotalSpecs">Total specs tested: </li>' +
-      '<li id="summaryTotalFailed">Total failed: </li>' +
-      '</ul>' +
-      '<%= quickLinks %>' +
-      '</div>'
+    '<div id="summary" class="passed">' +
+    '<h4>Summary</h4>' +
+    '<ul>' +
+    '<li id="summaryTotalSuites">Total suites tested: </li>' +
+    '<li id="summaryTotalSpecs">Total specs tested: </li>' +
+    '<li id="summaryTotalFailed">Total failed: </li>' +
+    '</ul>' +
+    '<%= quickLinks %>' +
+    '</div>'
   );
 
   var addQuickLinks = _.template(
-      '<ul id="quickLinks"></ul>'
+    '<ul id="quickLinks"></ul>'
   );
 
   var closeReportTemplate = _.template(
-      '</body>' +
-      '</html>'
+    '</body>' +
+    '</html>'
   );
 
   var reportTemplate = _.template(
-      '<%= report %>'
+    '<%= report %>'
   );
 
   var reasonsTemplate = _.template(
-      '<ul>' +
-      '<% _.forEach(reasons, function(reason, key) { %>' +
-      '<li><%- reason.message %> [<a href="javascript:showhide(\'<%= id %><%= key %>\')">stack</a>]<br/>' +
-      '<span style="display: none" id="<%= id %><%= key %>" class="stacktrace"><%- reason.stack %></span></li>' +
-      '<% }); %>' +
-      '</ul>'
+    '<ul>' +
+    '<% _.forEach(reasons, function(reason, key) { %>' +
+    '<li><%- reason.message %> [<a href="javascript:showhide(\'<%= id %><%= key %>\')">stack</a>]<br/>' +
+    '<span style="display: none" id="<%= id %><%= key %>" class="stacktrace"><%- reason.stack %></span></li>' +
+    '<% }); %>' +
+    '</ul>'
   );
 
   var configurationTemplate = _.template(
-      '<a href="javascript:showhide(\'<%= configId %>\')">' +
-      'Toggle Configuration' +
-      '</a>' +
-      '<div class="config" id="<%= configId %>" style="display: none">' +
-      '<h4>Configuration</h4>' +
-      '<%= configBody %>' +
-      '</div>'
+    '<a href="javascript:showhide(\'<%= configId %>\')">' +
+    'Toggle Configuration' +
+    '</a>' +
+    '<div class="config" id="<%= configId %>" style="display: none">' +
+    '<h4>Configuration</h4>' +
+    '<%= configBody %>' +
+    '</div>'
   );
 
   var objectToItemTemplate = _.template(
-      '<li>' +
-      '<%= key %>:  <%= value %>' +
-      '</li>'
+    '<li>' +
+    '<%= key %>:  <%= value %>' +
+    '</li>'
   );
 
   // write data into opts.dest as filename
@@ -201,32 +206,32 @@ function Jasmine2ScreenShotReporter(opts) {
     stream.end();
   };
 
-  var writeMetadata = function(data, filename) {
+  var writeMetadata = function (data, filename) {
     var stream;
 
     try {
       stream = fs.createWriteStream(filename);
       stream.write(JSON.stringify(data, null, '\t'));
       stream.end();
-    } catch(e) {
+    } catch (e) {
       console.error('Couldn\'t save metadata: ' + filename);
     }
   };
 
   // returns suite clone or creates one
-  var getSuiteClone = function(suite) {
+  var getSuiteClone = function (suite) {
     suites[suite.id] = _.extend((suites[suite.id] || {}), suite);
     return suites[suite.id];
   };
 
   // returns spec clone or creates one
-  var getSpecClone = function(spec) {
+  var getSpecClone = function (spec) {
     specs[spec.id] = _.extend((specs[spec.id] || {}), spec);
     return specs[spec.id];
   };
 
   // returns duration in seconds
-  var getDuration = function(obj) {
+  var getDuration = function (obj) {
     if (!obj._started || !obj._finished) {
       return 0;
     }
@@ -234,15 +239,15 @@ function Jasmine2ScreenShotReporter(opts) {
     return (duration < 1) ? duration : Math.round(duration);
   };
 
-  var pathBuilder = function() {
+  var pathBuilder = function () {
     return hat();
   };
 
-  var metadataBuilder = function() {
+  var metadataBuilder = function () {
     return false;
   };
 
-  var isSpecValid = function(spec) {
+  var isSpecValid = function (spec) {
     // Don't screenshot skipped specs
     var isSkipped = opts.ignoreSkippedSpecs && spec.status === 'pending';
     // Screenshot only for failed specs
@@ -251,22 +256,22 @@ function Jasmine2ScreenShotReporter(opts) {
     return !isSkipped && !isIgnored;
   };
 
-  var isSpecReportable = function(spec) {
+  var isSpecReportable = function (spec) {
     return (opts.reportOnlyFailedSpecs && spec.status === 'failed') || !opts.reportOnlyFailedSpecs;
   };
 
-  var hasValidSpecs = function(suite) {
+  var hasValidSpecs = function (suite) {
     var validSuites = false;
     var validSpecs = false;
 
     if (suite._suites.length) {
-      validSuites = _.any(suite._suites, function(s) {
+      validSuites = _.any(suite._suites, function (s) {
         return hasValidSpecs(s);
       });
     }
 
     if (suite._specs.length) {
-      validSpecs = _.any(suite._specs, function(s) {
+      validSpecs = _.any(suite._specs, function (s) {
         return isSpecValid(s) || isSpecReportable(s);
       });
     }
@@ -274,38 +279,38 @@ function Jasmine2ScreenShotReporter(opts) {
     return validSuites || validSpecs;
   };
 
-  var getDestination = function(){
+  var getDestination = function () {
     return (opts.dest || DEFAULT_DESTINATION) + '/';
   };
 
-  var getDestinationWithUniqueDirectory = function(){
+  var getDestinationWithUniqueDirectory = function () {
     return getDestination() + hat() + '/';
   };
 
-  var getCssLinks = function(cssFiles) {
+  var getCssLinks = function (cssFiles) {
     var cssLinks = '';
 
-    _.each(cssFiles, function(file) {
-      cssLinks +='<link type="text/css" rel="stylesheet" href="' + file + '">';
+    _.each(cssFiles, function (file) {
+      cssLinks += '<link type="text/css" rel="stylesheet" href="' + file + '">';
     });
 
     return cssLinks;
   };
 
-  var cleanDestination = function(callback) {
+  var cleanDestination = function (callback) {
     // if we aren't removing the old report folder then simply return
     if (!opts.cleanDestination) {
       callback();
       return;
     }
 
-    rimraf(opts.dest, function(err) {
-      if(err) {
+    rimraf(opts.dest, function (err) {
+      if (err) {
         throw new Error('Could not remove previous destination directory ' + opts.dest);
       }
 
-      mkdirp(opts.dest, function(err) {
-        if(err) {
+      mkdirp(opts.dest, function (err) {
+        if (err) {
           throw new Error('Could not create directory ' + opts.dest);
         }
 
@@ -315,16 +320,16 @@ function Jasmine2ScreenShotReporter(opts) {
   };
 
   // TODO: more options
-  opts          = opts || {};
+  opts = opts || {};
   opts.preserveDirectory = opts.preserveDirectory || false;
-  opts.dest     = opts.preserveDirectory ?  getDestinationWithUniqueDirectory() : getDestination();
+  opts.dest = opts.preserveDirectory ? getDestinationWithUniqueDirectory() : getDestination();
   opts.filename = opts.filename || 'report.html';
   opts.ignoreSkippedSpecs = opts.ignoreSkippedSpecs || false;
   opts.reportOnlyFailedSpecs = opts.hasOwnProperty('reportOnlyFailedSpecs') ? opts.reportOnlyFailedSpecs : true;
   opts.captureOnlyFailedSpecs = opts.captureOnlyFailedSpecs || false;
   opts.pathBuilder = opts.pathBuilder || pathBuilder;
   opts.metadataBuilder = opts.metadataBuilder || metadataBuilder;
-  opts.userCss = Array.isArray(opts.userCss) ?  opts.userCss : opts.userCss ? [ opts.userCss ] : [];
+  opts.userCss = Array.isArray(opts.userCss) ? opts.userCss : opts.userCss ? [opts.userCss] : [];
   opts.totalSpecsDefined = null;
   opts.showSummary = opts.hasOwnProperty('showSummary') ? opts.showSummary : true;
   opts.showQuickLinks = opts.showQuickLinks || false;
@@ -356,8 +361,17 @@ function Jasmine2ScreenShotReporter(opts) {
     });
   }
 
+  function escapeInvalidXmlChars(str) {
+    return str.replace(/\&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/\>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/\'/g, "&apos;")
+      .replace(/[\x1b]/g, ""); //Remove control character 
+  }
+
   function printSpec(spec) {
-    var suiteName = spec._suite ? spec._suite.fullName : '';
+    var suiteName = escapeInvalidXmlChars(spec._suite ? spec._suite.fullName : '');
     var template = !_.isEmpty(spec.filename) ? linkTemplate : nonLinkTemplate;
 
     if (spec.isPrinted || (spec.skipPrinting && !isSpecReportable(spec))) {
@@ -371,27 +385,27 @@ function Jasmine2ScreenShotReporter(opts) {
       cssClass: statusCssClass[spec.status],
       duration: getDuration(spec),
       filename: spec.filename,
-      id:       uuid.v1(),
-      mark:     marks[spec.status],
-      name:     spec.fullName.replace(suiteName, '').trim(),
-      reason:   printReasonsForFailure(spec),
-      specId:   spec.id
+      id: uuid.v1(),
+      mark: marks[spec.status],
+      name: spec.fullName.replace(suiteName, '').trim(),
+      reason: printReasonsForFailure(spec),
+      specId: spec.id
     });
   }
-  
-  function suitePassed (suite) {
-    for(var i=0; i<suite._specs.length; i++) {
-        if(suite._specs[i].status === 'failed') {
-            return false;        
-        }
+
+  function suitePassed(suite) {
+    for (var i = 0; i < suite._specs.length; i++) {
+      if (suite._specs[i].status === 'failed') {
+        return false;
+      }
     }
-    
-    for(var i=0; i<suite._suites.length; i++) {
-        if(!suitePassed(suite._suites[i])) {
-            return false;  
-        }
+
+    for (var i = 0; i < suite._suites.length; i++) {
+      if (!suitePassed(suite._suites[i])) {
+        return false;
+      }
     }
-    
+
     return true;
   }
 
@@ -403,20 +417,19 @@ function Jasmine2ScreenShotReporter(opts) {
     }
 
     suite.isPrinted = true;
-        
+
     var markerHtml = suitePassed(suite) ? '<span class="passed-suite">&#10003;</span>' : '<span class="failed-suite">&#10007;</span>';
-    var expanderHtml
 
-    output += '<ul style="list-style-type:none;-webkit-padding-start: 15px;">';
-    output += '<h4>' + markerHtml + ' ' + suite.description + ' (' + getDuration(suite) + ' s)</h4><span>&#10133;</span><span>&#10134;</span>';
+    output += '<ul style="list-style-type:none">';
+    output += '<h4>' + markerHtml + ' ' + suite.description + ' (' + getDuration(suite) + ' s)</h4>';
 
-    _.each(suite._specs, function(spec) {
+    _.each(suite._specs, function (spec) {
       spec = specs[spec.id];
       output += printSpec(spec);
     });
 
     if (suite._suites.length) {
-      _.each(suite._suites, function(childSuite) {
+      _.each(suite._suites, function (childSuite) {
         output += printResults(childSuite);
       });
     }
@@ -441,66 +454,66 @@ function Jasmine2ScreenShotReporter(opts) {
     var keys = Object.keys(testConfiguration);
 
     var configOutput = '';
-    _.each(keys, function(key) {
-      configOutput += objectToItemTemplate({'key': key, 'value': testConfiguration[key]});
+    _.each(keys, function (key) {
+      configOutput += objectToItemTemplate({ 'key': key, 'value': testConfiguration[key] });
     });
 
     var configId = uuid.v1();
-    return configurationTemplate({'configBody': configOutput, 'configId': configId});
+    return configurationTemplate({ 'configBody': configOutput, 'configId': configId });
   }
 
-  this.beforeLaunch = function(callback) {
+  this.beforeLaunch = function (callback) {
     console.log('Report destination:  ', path.join(opts.dest, opts.filename));
 
     var cssLinks = getCssLinks(opts.userCss);
-    var summaryQuickLinks = opts.showQuickLinks ? addQuickLinks(): '';
+    var summaryQuickLinks = opts.showQuickLinks ? addQuickLinks() : '';
     var reportSummary = opts.showSummary ? addReportSummary({ quickLinks: summaryQuickLinks }) : '';
 
 
     // Now you'll need to build the replacement report text for the file.
-    var reportContent = openReportTemplate({ userCss: cssLinks});
-    reportContent += addReportTitle({ title: opts.reportTitle});
+    var reportContent = openReportTemplate({ userCss: cssLinks });
+    reportContent += addReportTitle({ title: opts.reportTitle });
     reportContent += reportSummary;
 
     // Now remove the existing stored content and replace it with the new report shell.
-    cleanDestination(function(err) {
+    cleanDestination(function (err) {
       if (err) {
         throw err;
       }
 
       fs.appendFile(
-          path.join(opts.dest, opts.filename),
-          reportContent,
-          { encoding: 'utf8' },
-          function(err) {
-            if (err) {
-              console.error ('Error writing to file: ' + path.join(opts.dest, opts.filename));
-              throw err;
-            }
-            callback();
-          }
-      );
-    });
-  };
-
-  this.afterLaunch = function(callback) {
-    console.log('Closing report');
-
-    fs.appendFile(
         path.join(opts.dest, opts.filename),
-        closeReportTemplate(),
+        reportContent,
         { encoding: 'utf8' },
-        function(err) {
-          if(err) {
-            console.error('Error writing to file:' + path.join(opts.dest, opts.filename));
+        function (err) {
+          if (err) {
+            console.error('Error writing to file: ' + path.join(opts.dest, opts.filename));
             throw err;
           }
           callback();
         }
+      );
+    });
+  };
+
+  this.afterLaunch = function (callback) {
+    console.log('Closing report');
+
+    fs.appendFile(
+      path.join(opts.dest, opts.filename),
+      closeReportTemplate(),
+      { encoding: 'utf8' },
+      function (err) {
+        if (err) {
+          console.error('Error writing to file:' + path.join(opts.dest, opts.filename));
+          throw err;
+        }
+        callback();
+      }
     );
   };
 
-  this.jasmineStarted = function(suiteInfo) {
+  this.jasmineStarted = function (suiteInfo) {
     opts.totalSpecsDefined = suiteInfo.totalSpecsDefined;
 
     /* Dirty fix to make sure last screenshot is always linked to the report
@@ -521,7 +534,7 @@ function Jasmine2ScreenShotReporter(opts) {
     });
   };
 
-  this.suiteStarted = function(suite) {
+  this.suiteStarted = function (suite) {
     suite = getSuiteClone(suite);
     suite._suites = [];
     suite._specs = [];
@@ -535,7 +548,7 @@ function Jasmine2ScreenShotReporter(opts) {
     runningSuite = suite;
   };
 
-  this.suiteDone = function(suite) {
+  this.suiteDone = function (suite) {
     suite = getSuiteClone(suite);
     if (suite._parent === undefined) {
       // disabled suite (xdescribe) -- suiteStarted was never called
@@ -545,7 +558,7 @@ function Jasmine2ScreenShotReporter(opts) {
     runningSuite = suite._parent;
   };
 
-  this.specStarted = function(spec) {
+  this.specStarted = function (spec) {
     if (!runningSuite) {
       // focused spec (fit) -- suiteStarted was never called
       self.suiteStarted(fakeFocusedSuite);
@@ -556,7 +569,7 @@ function Jasmine2ScreenShotReporter(opts) {
     runningSuite._specs.push(spec);
   };
 
-  this.specDone = function(spec) {
+  this.specDone = function (spec) {
     spec.filename = {};
     spec = getSpecClone(spec);
     spec._finished = Date.now();
@@ -573,27 +586,27 @@ function Jasmine2ScreenShotReporter(opts) {
       browserInstance.takeScreenshot().then(function (png) {
         browserInstance.getCapabilities().then(function (capabilities) {
           var screenshotPath,
-              metadataPath,
-              metadata;
+            metadataPath,
+            metadata;
 
           var file = opts.pathBuilder(spec, suites, capabilities);
           spec.filename[key] = file + '.png';
 
           screenshotPath = path.join(opts.dest, spec.filename[key]);
-          metadata       = opts.metadataBuilder(spec, suites, capabilities);
+          metadata = opts.metadataBuilder(spec, suites, capabilities);
 
           if (metadata) {
             metadataPath = path.join(opts.dest, file + '.json');
-            mkdirp(path.dirname(metadataPath), function(err) {
-              if(err) {
+            mkdirp(path.dirname(metadataPath), function (err) {
+              if (err) {
                 throw new Error('Could not create directory for ' + metadataPath);
               }
               writeMetadata(metadata, metadataPath);
             });
           }
 
-          mkdirp(path.dirname(screenshotPath), function(err) {
-            if(err) {
+          mkdirp(path.dirname(screenshotPath), function (err) {
+            if (err) {
               throw new Error('Could not create directory for ' + screenshotPath);
             }
             writeScreenshot(png, spec.filename[key]);
@@ -603,7 +616,7 @@ function Jasmine2ScreenShotReporter(opts) {
     });
   };
 
-  this.jasmineDone = function() {
+  this.jasmineDone = function () {
     var output = '';
 
     if (runningSuite) {
@@ -611,12 +624,12 @@ function Jasmine2ScreenShotReporter(opts) {
       self.suiteDone(fakeFocusedSuite);
     }
 
-    _.each(suites, function(suite) {
+    _.each(suites, function (suite) {
       output += printResults(suite);
     });
 
     // Ideally this shouldn't happen, but some versions of jasmine will allow it
-    _.each(specs, function(spec) {
+    _.each(specs, function (spec) {
       output += printSpec(spec);
     });
 
@@ -624,7 +637,7 @@ function Jasmine2ScreenShotReporter(opts) {
     if (opts.showConfiguration) {
       var suiteHasSpecs = false;
 
-      _.each(specs, function(spec) {
+      _.each(specs, function (spec) {
         suiteHasSpecs = spec.isPrinted || suiteHasSpecs;
       });
 
@@ -634,15 +647,15 @@ function Jasmine2ScreenShotReporter(opts) {
     }
 
     fs.appendFileSync(
-        path.join(opts.dest, opts.filename),
-        reportTemplate({ report: output }),
-        { encoding: 'utf8' },
-        function(err) {
-          if(err) {
-            console.error('Error writing to file:' + path.join(opts.dest, opts.filename));
-            throw err;
-          }
+      path.join(opts.dest, opts.filename),
+      reportTemplate({ report: output }),
+      { encoding: 'utf8' },
+      function (err) {
+        if (err) {
+          console.error('Error writing to file:' + path.join(opts.dest, opts.filename));
+          throw err;
         }
+      }
     );
   };
 
